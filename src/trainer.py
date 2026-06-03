@@ -24,7 +24,7 @@ class PINNTrainer:
         batch = self.move_batch_to_device(batch)
         optimizer = optim.Adam(self.model.parameters(), lr=lr)
         scheduler = optim.lr_scheduler.ReduceLROnPlateau(
-            optimizer, patience=500, factor=0.5, verbose=False
+            optimizer, patience=500, factor=0.5
         )
 
         print(' Phase 1: Adam Optimization')
