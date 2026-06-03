@@ -1,7 +1,7 @@
 
 import numpy as np
 from dataclasses import dataclass
-from typing import Tuple, Optional
+from typing import Dict, Tuple, Optional
 from swing_equation import SMIBParameters, SwingEquationSolver
 
 

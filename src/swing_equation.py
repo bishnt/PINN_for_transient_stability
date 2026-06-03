@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 import numpy as np
 from dataclasses import dataclass
 from typing import Tuple, Optional
@@ -13,12 +12,10 @@ class SMIBParameters:
   E: float = 1.05 #generator internal voltage (pu)
   V: float = 1.0 #infinite bus voltage (pu)
 
-@property
-#defining the pre fault rotor angle
-def delta_eq(self) -> float:
-  return np.arcsin(self.Pm / self.Pmax)
-
-from typing import Tuple, Optional
+  @property
+  #defining the pre fault rotor angle
+  def delta_eq(self) -> float:
+    return np.arcsin(self.Pm / self.Pmax)
 
 #equation solver usimg RK-4th order method.
 class SwingEquationSolver:
