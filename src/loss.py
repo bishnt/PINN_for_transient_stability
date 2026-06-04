@@ -78,11 +78,11 @@ class PINNLoss:
             self.mse(delta_pred / delta_std, batch['delta_data'] / delta_std) +
             self.mse(omega_pred / omega_std, batch['omega_data'] / omega_std)
         )
-
+        #ic loss
         pred_ic = model(batch['t_ic'])
         loss_ic = (
-            self.mse(pred_ic[:, 0:1], batch['delta_ic']) +
-            self.mse(pred_ic[:, 1:2], batch['omega_ic'])
+            self.mse(pred_ic[:, 0:1] / delta_std, batch['delta_ic'] / delta_std) +
+            self.mse(pred_ic[:, 1:2] / omega_std, batch['omega_ic'] / omega_std)
         )
 
         total = (self.lambda_phys * loss_phys +
