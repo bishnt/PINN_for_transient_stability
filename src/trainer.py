@@ -67,6 +67,7 @@ class PINNTrainer:
         for epoch in pbar:
             def closure():
                 optimizer.zero_grad()
+                batch['t_colloc'].requires_grad_(True) 
                 losses = self.loss_fn(self.model, batch)
                 losses['total'].backward()
                 return losses['total']

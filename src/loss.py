@@ -11,15 +11,34 @@ class PINNLoss:
         lambda_phys: float = 1.0,
         lambda_data: float = 10.0,
         lambda_ic: float = 100.0,
-        fault_factor: float = 1.0
+        fault_start: float = 0.1,
+        fault_end: float = 0.2,
+        fault_factor_pre: float = 1.0,
+        fault_factor_fault: float = 0.0,
+        fault_factor_post: float = 1.0,
     ):
         self.p = params
         self.lambda_phys = lambda_phys
         self.lambda_data = lambda_data
         self.lambda_ic = lambda_ic
-        self.fault_factor = fault_factor
+        self.fault_start = fault_start
+        self.fault_end = fault_end
+        self.fault_factor_pre = fault_factor_pre
+        self.fault_factor_fault = fault_factor_fault
+        self.fault_factor_post = fault_factor_post
         self.mse = nn.MSELoss()
 
+    def _fault_factor_tensor(self, t: torch.Tensor) -> torch.Tensor:
+          pre   = (t < self.fault_start).float()
+          fault = ((t >= self.fault_start) & (t < self.fault_end)).float()
+          post  = (t >= self.fault_end).float()
+    
+          return (
+                self.fault_factor_pre   * pre   +
+                self.fault_factor_fault * fault +
+                self.fault_factor_post  * post
+          )
+    
     def compute_physics_residual(
         self,
         model,
@@ -45,12 +64,16 @@ class PINNLoss:
 
         omega_dev = omega - self.p.omega0
         residual_delta = d_delta_dt - omega_dev
-
-        Pe = self.fault_factor * self.p.Pmax * torch.sin(delta)
+        
+        # Time-varying fault factor per collocation point
+        ff = self._fault_factor_tensor(t_colloc.detach())
+        Pe = ff * self.p.Pmax * torch.sin(delta)
+ 
         residual_omega = d_omega_dt - (
-            (self.p.omega0 / (2 * self.p.H)) *
+            (self.p.omega0 / (2.0 * self.p.H)) *
             (self.p.Pm - Pe - self.p.D * omega_dev)
         )
+        
         omega0 = self.p.omega0
         accel_scale = omega0 / (2.0 * self.p.H) 
         return residual_delta / omega0, residual_omega / accel_scale
