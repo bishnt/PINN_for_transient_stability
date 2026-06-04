@@ -11,6 +11,12 @@ class PINN(nn.Module):
       activation: str = 'tanh'
   ):
     super().__init__()
+    
+    self.register_buffer('t_scale',    torch.tensor(1.0))
+    self.register_buffer('delta_mean', torch.tensor(0.0))
+    self.register_buffer('delta_std',  torch.tensor(1.0))
+    self.register_buffer('omega_mean', torch.tensor(0.0))
+    self.register_buffer('omega_std',  torch.tensor(1.0))
 
     layers =[]
 
