@@ -20,10 +20,6 @@ class PINNTrainer:
         }
 
     def _compute_adaptive_weights(self, batch: Dict):
-          """
-          NTK-inspired adaptive loss balancing.
-          batch must already be on device with requires_grad set correctly.
-          """
           self.model.zero_grad()
           losses = self.loss_fn(self.model, batch)
     

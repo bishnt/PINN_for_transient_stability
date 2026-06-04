@@ -79,42 +79,46 @@ class PINNLoss:
         return residual_delta / omega0, residual_omega / accel_scale
 
     def __call__(
-        self,
-        model,
-        batch: Dict[str, torch.Tensor]
-    ) -> Dict[str, torch.Tensor]:
-        #physics_loss
-        res_d, res_w = self.compute_physics_residual(model, batch['t_colloc'])
-        loss_phys = (
-            self.mse(res_d, torch.zeros_like(res_d)) +
-            self.mse(res_w, torch.zeros_like(res_w))
-        )
-        #data_loss
-        pred_data = model(batch['t_data'])
-        delta_pred  = pred_data[:, 0:1]
-        omega_pred  = pred_data[:, 1:2]
- 
-        delta_std = model.delta_std
-        omega_std = model.omega_std
- 
-        loss_data = (
-            self.mse(delta_pred / delta_std, batch['delta_data'] / delta_std) +
-            self.mse(omega_pred / omega_std, batch['omega_data'] / omega_std)
-        )
-        #ic loss
-        pred_ic = model(batch['t_ic'])
-        loss_ic = (
-            self.mse(pred_ic[:, 0:1] / delta_std, batch['delta_ic'] / delta_std) +
-            self.mse(pred_ic[:, 1:2] / omega_std, batch['omega_ic'] / omega_std)
-        )
-
-        total = (self.lambda_phys * loss_phys +
-                 self.lambda_data * loss_data +
-                 self.lambda_ic * loss_ic)
-
-        return {
-            'total': total,
-            'physics': loss_phys.detach(),
-            'data': loss_data.detach(),
-            'ic': loss_ic.detach(),
-        }
+                self,
+                model,
+                batch: Dict[str, torch.Tensor]
+          ) -> Dict[str, torch.Tensor]:
+                
+                t_colloc = batch['t_colloc'].clone().detach().requires_grad_(True)
+                
+                # physics_loss
+                res_d, res_w = self.compute_physics_residual(model, t_colloc)
+                loss_phys = (
+                          self.mse(res_d, torch.zeros_like(res_d)) +
+                          self.mse(res_w, torch.zeros_like(res_w))
+                )
+                
+                # data_loss
+                pred_data = model(batch['t_data'])
+                delta_pred  = pred_data[:, 0:1]
+                omega_pred  = pred_data[:, 1:2]
+    
+                delta_std = model.delta_std
+                omega_std = model.omega_std
+    
+                loss_data = (
+                          self.mse(delta_pred / delta_std, batch['delta_data'] / delta_std) +
+                          self.mse(omega_pred / omega_std, batch['omega_data'] / omega_std)
+                )
+                # ic loss
+                pred_ic = model(batch['t_ic'])
+                loss_ic = (
+                          self.mse(pred_ic[:, 0:1] / delta_std, batch['delta_ic'] / delta_std) +
+                          self.mse(pred_ic[:, 1:2] / omega_std, batch['omega_ic'] / omega_std)
+                )
+    
+                total = (self.lambda_phys * loss_phys +
+                                          self.lambda_data * loss_data +
+                                          self.lambda_ic * loss_ic)
+    
+                return {
+                          'total': total,
+                          'physics': loss_phys.detach(),
+                          'data': loss_data.detach(),
+                          'ic': loss_ic.detach(),
+                }
