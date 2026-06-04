@@ -19,31 +19,50 @@ class PINNTrainer:
             for k, v in batch.items()
         }
 
-    def _compute_adaptive_weights(self, batch: Dict):
-          self.model.zero_grad()
-          losses = self.loss_fn(self.model, batch)
-    
-          grad_norms = {}
-          for key in ['physics', 'data', 'ic']:
-                if losses[key].requires_grad:
-                          grads = torch.autograd.grad(
-                                          losses[key],
-                                          self.model.parameters(),
-                                          retain_graph=True,
-                                          allow_unused=True
-                          )
-                          norm = sum(
-                                          g.norm() ** 2 for g in grads if g is not None
-                          ).sqrt()
-                          grad_norms[key] = norm.item() + 1e-8
-                else:
-                          grad_norms[key] = 1e-8
-    
-          mean_norm = np.mean(list(grad_norms.values()))
-          weights = {k: mean_norm / v for k, v in grad_norms.items()}
-          w_sum = sum(weights.values())
-          weights = {k: 3.0 * v / w_sum for k, v in weights.items()}
-          return weights
+    def _compute_adaptive_weights(self, batch, alpha=0.1, min_weight=0.05):
+        """
+        Computes stabilized NTK-based adaptive weights for PINN losses.
+        """
+        # Calculate losses first so the 'losses' variable exists in this scope
+        losses = self.loss_fn(self.model, batch)
+        
+        # Calculate gradient norms for each loss component
+        grad_norms = {}
+        params = [p for p in self.model.parameters() if p.requires_grad]
+        
+        for key in ['physics', 'data', 'ic']:
+            grads = torch.autograd.grad(
+                losses[key], 
+                params, 
+                retain_graph=True, 
+                allow_unused=True
+            )
+            grad_norm = torch.sqrt(sum(g.pow(2).sum() for g in grads if g is not None))
+            grad_norms[key] = grad_norm.item()
+
+        # Compute NTK traces safely
+        traces = {}
+        for key in ['physics', 'data', 'ic']:
+            val = losses[key]
+            loss_val = val.item() if hasattr(val, 'item') else float(val)
+            loss_val = max(loss_val, 1e-6)
+            traces[key] = (grad_norms[key] ** 2) / (4 * loss_val)
+
+        # Anchor-Based Scaling relative to 'data' loss
+        anchor_trace = traces['data'] + 1e-8
+        target_w_physics = anchor_trace / (traces['physics'] + 1e-8)
+        target_w_ic = anchor_trace / (traces['ic'] + 1e-8)
+
+        # Smooth updates across epochs using Exponential Moving Average (EMA)
+        self.weights['physics'] = (1 - alpha) * self.weights['physics'] + alpha * target_w_physics
+        self.weights['ic'] = (1 - alpha) * self.weights['ic'] + alpha * target_w_ic
+        self.weights['data'] = 1.0 
+
+        # Guardrail floor
+        self.weights['physics'] = max(self.weights['physics'], min_weight)
+        self.weights['ic'] = max(self.weights['ic'], min_weight)
+
+        return self.weights
     
     def train_adam(
           self,
