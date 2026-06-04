@@ -12,8 +12,9 @@ class PINNTrainer:
         self.history = {'total': [], 'physics': [], 'data': [], 'ic': []}
 
     def move_batch_to_device(self, batch: Dict) -> Dict:
+          GRAD_KEYS = {'t_colloc', 'x_colloc'}  # add any other keys needing grad
           return {
-                k: v.to(self.device).requires_grad_(v.requires_grad)
+                k: v.to(self.device).requires_grad_(k in GRAD_KEYS)
                 if isinstance(v, torch.Tensor) else v
                 for k, v in batch.items()
           }
@@ -52,38 +53,35 @@ class PINNTrainer:
                 })
         print(f'Adam done. Final loss: {self.history["total"][-1]:.2e}')
 
-    def train_lbfgs(
-        self,
-        batch: Dict,
-        n_epochs: int = 1000,
-        lr: float = 0.01
-    ):
-        batch = self.move_batch_to_device(batch)
-        optimizer = optim.LBFGS(
-            self.model.parameters(),
-            lr=lr, max_iter=20,
-            history_size=100,
-            line_search_fn='strong_wolfe'
-        )
+def train_lbfgs(self, batch, n_epochs=1000, lr=0.01):
+    batch = self.move_batch_to_device(batch)  # grad already set correctly now
+    optimizer = optim.LBFGS(
+        self.model.parameters(),
+        lr=lr, max_iter=20,
+        history_size=100,
+        line_search_fn='strong_wolfe'
+    )
 
-        print(' Phase 2: L-BFGS Fine-Tuning')
-        pbar = tqdm(range(n_epochs), desc='L-BFGS')
-        for epoch in pbar:
-            def closure():
-                optimizer.zero_grad()
-                batch['t_colloc'].requires_grad_(True) 
-                losses = self.loss_fn(self.model, batch)
-                losses['total'].backward()
-                return losses['total']
-            optimizer.step(closure)
+    print(' Phase 2: L-BFGS Fine-Tuning')
+    pbar = tqdm(range(n_epochs), desc='L-BFGS')
+    loss_cache = {}
 
-            with torch.no_grad():
-                losses = self.loss_fn(self.model, batch)
-            for key in self.history:
-                self.history[key].append(losses[key].item())
-            if epoch % 100 == 0:
-                pbar.set_postfix({'total': f"{losses['total'].item():.2e}"})
-        print(f'L-BFGS done. Final loss: {self.history["total"][-1]:.2e}')
+    for epoch in pbar:
+        def closure():
+            optimizer.zero_grad()
+            losses = self.loss_fn(self.model, batch)  # no requires_grad_ here
+            losses['total'].backward()
+            loss_cache.update(losses)          # cache for logging
+            return losses['total']
+
+        optimizer.step(closure)
+
+        with torch.no_grad():
+            losses = self.loss_fn(self.model, batch)
+        for key in self.history:
+            self.history[key].append(losses[key].item())
+        if epoch % 100 == 0:
+            pbar.set_postfix({'total': f"{losses['total'].item():.2e}"})
 
     def save_model(self, path: str):
         torch.save({
