@@ -118,7 +118,7 @@ class PINNLoss:
     
                 return {
                           'total': total,
-                          'physics': loss_phys.detach(),
-                          'data': loss_data.detach(),
-                          'ic': loss_ic.detach(),
+                          'physics': loss_phys,
+                          'data': loss_data,
+                          'ic': loss_ic,
                 }
