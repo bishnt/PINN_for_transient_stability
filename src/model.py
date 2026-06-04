@@ -45,10 +45,38 @@ class PINN(nn.Module):
       if isinstance(module, nn.Linear):
         nn.init.xavier_uniform_(module.weight)
         nn.init.zeros_(module.bias)
+        
+        
+  def set_normalizer(
+        self,
+        t_scale: float,
+        delta_mean: float,
+        delta_std: float,
+        omega_mean: float,
+        omega_std: float,
+    ):
+        self.t_scale.fill_(t_scale)
+        self.delta_mean.fill_(delta_mean)
+        self.delta_std.fill_(delta_std)
+        self.omega_mean.fill_(omega_mean)
+        self.omega_std.fill_(omega_std)
+ 
+  def _normalize_t(self, t: torch.Tensor) -> torch.Tensor:
+        return t / self.t_scale
+ 
+  def _denormalize_delta(self, d_norm: torch.Tensor) -> torch.Tensor:
+        return d_norm * self.delta_std + self.delta_mean
+ 
+  def _denormalize_omega(self, w_norm: torch.Tensor) -> torch.Tensor:
+        return w_norm * self.omega_std + self.omega_mean
 
-  def forward(self, x: torch.Tensor) -> torch.Tensor:
-    return self.network(x)
-
+  def forward(self, t: torch.Tensor) -> torch.Tensor:
+        t_norm = self._normalize_t(t)           # map to [0, 1]
+        out_norm = self.network(t_norm)          # network output in normalised space
+        delta = self._denormalize_delta(out_norm[:, 0:1])
+        omega = self._denormalize_omega(out_norm[:, 1:2])
+        return torch.cat([delta, omega], dim=1)
+      
   def predict_delta_omega(
     self, t: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
     #Return delta and omega as separate tensors.
