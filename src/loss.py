@@ -11,7 +11,7 @@ class PINNLoss:
         lambda_phys: float = 1.0,
         lambda_data: float = 10.0,
         lambda_ic: float = 100.0,
-        fault_factor: float = 0.0
+        fault_factor: float = 1.0
     ):
         self.p = params
         self.lambda_phys = lambda_phys
@@ -51,23 +51,32 @@ class PINNLoss:
             (self.p.omega0 / (2 * self.p.H)) *
             (self.p.Pm - Pe - self.p.D * omega_dev)
         )
-        return residual_delta, residual_omega
+        omega0 = self.p.omega0
+        accel_scale = omega0 / (2.0 * self.p.H) 
+        return residual_delta / omega0, residual_omega / accel_scale
 
     def __call__(
         self,
         model,
         batch: Dict[str, torch.Tensor]
     ) -> Dict[str, torch.Tensor]:
+        #physics_loss
         res_d, res_w = self.compute_physics_residual(model, batch['t_colloc'])
         loss_phys = (
             self.mse(res_d, torch.zeros_like(res_d)) +
             self.mse(res_w, torch.zeros_like(res_w))
         )
-
+        #data_loss
         pred_data = model(batch['t_data'])
+        delta_pred  = pred_data[:, 0:1]
+        omega_pred  = pred_data[:, 1:2]
+ 
+        delta_std = model.delta_std
+        omega_std = model.omega_std
+ 
         loss_data = (
-            self.mse(pred_data[:, 0:1], batch['delta_data']) +
-            self.mse(pred_data[:, 1:2], batch['omega_data'])
+            self.mse(delta_pred / delta_std, batch['delta_data'] / delta_std) +
+            self.mse(omega_pred / omega_std, batch['omega_data'] / omega_std)
         )
 
         pred_ic = model(batch['t_ic'])
