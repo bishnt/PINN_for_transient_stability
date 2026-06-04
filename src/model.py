@@ -6,7 +6,7 @@ from typing import Tuple
 class PINN(nn.Module):
   def __init__(
       self,
-      n_hidden_layers: int = 4,
+      n_hidden_layers: int = 6,
       n_neurons: int = 64,
       activation: str = 'tanh'
   ):

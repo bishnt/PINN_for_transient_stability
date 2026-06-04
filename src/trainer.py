@@ -64,58 +64,64 @@ class PINNTrainer:
         self.weights['ic'] = max(self.weights['ic'], min_weight)
 
         return self.weights
-    
-    def train_adam(
-          self,
-          batch: Dict,
-          n_epochs: int = 5000,
-          lr: float = 1e-3,
-          log_every: int = 500,
-          rebalance_every: int = 1000,
-    ):
-          batch = self.move_batch_to_device(batch)          # ← MUST be first
-          weights = self._compute_adaptive_weights(batch)   # ← now batch is ready
-          print(f'  Initial weights → physics: {weights["physics"]:.3f} | '
-                          f'data: {weights["data"]:.3f} | ic: {weights["ic"]:.3f}')
-    
-          optimizer = optim.Adam(self.model.parameters(), lr=lr)
-          scheduler = optim.lr_scheduler.ReduceLROnPlateau(
-                optimizer, patience=500, factor=0.5
-          )
-    
-          print(' Phase 1: Adam Optimization')
-          pbar = tqdm(range(n_epochs), desc='Adam')
-          for epoch in pbar:
-                if epoch > 0 and epoch % rebalance_every == 0:
-                          weights = self._compute_adaptive_weights(batch)
-    
-                optimizer.zero_grad()
-                losses = self.loss_fn(self.model, batch)
-                total = (
-                          weights['physics'] * losses['physics']
-                          + weights['data']  * losses['data']
-                          + weights['ic']    * losses['ic']
-                )
-                total.backward()
-                torch.nn.utils.clip_grad_norm_(self.model.parameters(), 1.0)
-                optimizer.step()
-                scheduler.step(total.detach())
-    
-                self.history['total'].append(total.item())
-                for key in ['physics', 'data', 'ic']:
-                          self.history[key].append(losses[key].item())
-    
-                if epoch % log_every == 0:
-                          pbar.set_postfix({
-                                          'total':   f"{total.item():.2e}",
-                                          'physics': f"{losses['physics'].item():.2e}",
-                                          'data':    f"{losses['data'].item():.2e}",
-                          })
-    
-          print(f'Adam done. Final loss: {self.history["total"][-1]:.2e}')
-          print(f'  Final weights → physics: {weights["physics"]:.3f} | '
-                          f'data: {weights["data"]:.3f} | ic: {weights["ic"]:.3f}')
 
+    def train_adam(
+        self,
+        batch: Dict,
+        n_epochs: int = 5000,
+        lr: float = 1e-3,
+        log_every: int = 500,
+        rebalance_every: int = 50,  # FIX 1: Update weights much more frequently
+    ):
+        batch = self.move_batch_to_device(batch)
+        weights = self._compute_adaptive_weights(batch)
+        print(f'  Initial weights → physics: {weights["physics"]:.3f} | '
+              f'data: {weights["data"]:.3f} | ic: {weights["ic"]:.3f}')
+    
+        optimizer = optim.Adam(self.model.parameters(), lr=lr, betas=(0.9, 0.999), eps=1e-8)
+        
+        scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=1500, gamma=0.5)
+    
+        print(' Phase 1: Adam Optimization')
+        pbar = tqdm(range(n_epochs), desc='Adam')
+        for epoch in pbar:
+            if epoch > 0 and epoch % rebalance_every == 0:
+                weights = self._compute_adaptive_weights(batch, alpha=0.2) 
+    
+            optimizer.zero_grad()
+            losses = self.loss_fn(self.model, batch)
+            
+            total = (
+                weights['physics'] * losses['physics']
+                + weights['data']  * losses['data']
+                + weights['ic']    * losses['ic']
+            )
+            
+            total.backward()
+            
+            # Gradient clipping protects against exploding gradients during weight shifts
+            torch.nn.utils.clip_grad_norm_(self.model.parameters(), 1.0)
+            
+            optimizer.step()
+            scheduler.step()  # Step every epoch based on schedule, not plateau
+    
+            # Log history
+            self.history['total'].append(total.item())
+            for key in ['physics', 'data', 'ic']:
+                self.history[key].append(losses[key].item())
+    
+            if epoch % log_every == 0:
+                pbar.set_postfix({
+                    'total':   f"{total.item():.2e}",
+                    'physics': f"{losses['physics'].item():.2e}",
+                    'data':    f"{losses['data'].item():.2e}",
+                    'lr':      f"{optimizer.param_groups[0]['lr']:.1e}"
+                })
+    
+        print(f'Adam done. Final loss: {self.history["total"][-1]:.2e}')
+        print(f'  Final weights → physics: {weights["physics"]:.3f} | '
+              f'data: {weights["data"]:.3f} | ic: {weights["ic"]:.3f}')
+        
     def train_lbfgs(                           
                 self,
                 batch: Dict,
