@@ -12,7 +12,11 @@ class PINNTrainer:
         self.history = {'total': [], 'physics': [], 'data': [], 'ic': []}
 
     def move_batch_to_device(self, batch: Dict) -> Dict:
-        return {k: v.to(self.device) for k, v in batch.items()}
+          return {
+                k: v.to(self.device).requires_grad_(v.requires_grad)
+                if isinstance(v, torch.Tensor) else v
+                for k, v in batch.items()
+          }
 
     def train_adam(
         self,
