@@ -9,6 +9,7 @@ class PINNTrainer:
         self.model = model.to(device)
         self.loss_fn = loss_fn
         self.device = device
+        self.weights = {'physics': 1.0, 'data': 1.0, 'ic': 1.0}
         self.history = {'total': [], 'physics': [], 'data': [], 'ic': []}
 
     def move_batch_to_device(self, batch: Dict) -> Dict:
