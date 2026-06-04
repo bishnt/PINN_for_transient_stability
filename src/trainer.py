@@ -97,57 +97,61 @@ class PINNTrainer:
                           f'data: {weights["data"]:.3f} | ic: {weights["ic"]:.3f}')
 
     def train_lbfgs(                           
-        self,
-        batch: Dict,
-        n_epochs: int = 400,
-        lr: float = 0.05,
-    ):
-        batch = self.move_batch_to_device(batch)
-
-        # Freeze weights at whatever Adam converged to
-        weights = self._compute_adaptive_weights(batch)
-
-        optimizer = optim.LBFGS(
-            self.model.parameters(),
-            lr=lr,
-            max_iter=20,
-            history_size=100,
-            line_search_fn='strong_wolfe'
-        )
-
-        print(' Phase 2: L-BFGS Fine-Tuning')
-        pbar = tqdm(range(n_epochs), desc='L-BFGS')
-
-        for epoch in pbar:
-            def closure():
-                optimizer.zero_grad()
-                losses = self.loss_fn(self.model, batch)
-                total = (
-                    weights['physics'] * losses['physics']
-                    + weights['data']   * losses['data']
-                    + weights['ic']     * losses['ic']
+                self,
+                batch: Dict,
+                n_epochs: int = 400,
+                lr: float = 0.05,
+          ):
+                batch = self.move_batch_to_device(batch)
+    
+                # Freeze adaptive loss weights at whatever Adam converged to
+                weights = self._compute_adaptive_weights(batch)
+    
+                optimizer = optim.LBFGS(
+                          self.model.parameters(),
+                          lr=lr,
+                          max_iter=20,
+                          history_size=100,
+                          line_search_fn='strong_wolfe'
                 )
-                total.backward()
-                return total
-
-            optimizer.step(closure)
-
-            with torch.no_grad():
-                losses = self.loss_fn(self.model, batch)
-                total = (
-                    weights['physics'] * losses['physics']
-                    + weights['data']   * losses['data']
-                    + weights['ic']     * losses['ic']
-                )
-
-            self.history['total'].append(total.item())
-            for key in ['physics', 'data', 'ic']:
-                self.history[key].append(losses[key].item())
-
-            if epoch % 100 == 0:
-                pbar.set_postfix({'total': f"{total.item():.2e}"})
-
-        print(f'L-BFGS done. Final loss: {self.history["total"][-1]:.2e}')
+    
+                print(' Phase 2: L-BFGS Fine-Tuning')
+                pbar = tqdm(range(n_epochs), desc='L-BFGS')
+    
+                for epoch in pbar:
+                          # Placeholders to capture the latest metrics from inside the closure
+                          epoch_losses = {}
+                          epoch_total = None
+    
+                          def closure():
+                                          nonlocal epoch_losses, epoch_total
+                                          optimizer.zero_grad()
+                                          losses = self.loss_fn(self.model, batch)
+                                          total = (
+                                          weights['physics'] * losses['physics']
+                                          + weights['data']   * losses['data']
+                                          + weights['ic']     * losses['ic']
+                                          )
+                                          total.backward()
+                                          
+                                          # Safely capture detached copies for logging
+                                          epoch_losses = {k: v.detach() for k, v in losses.items()}
+                                          epoch_total = total.detach()
+                                          
+                                          return total
+    
+                          # L-BFGS evaluates the closure multiple times per step during line search
+                          optimizer.step(closure)
+    
+                          # Log metrics using the values captured from the final closure evaluation
+                          self.history['total'].append(epoch_total.item())
+                          for key in ['physics', 'data', 'ic']:
+                                          self.history[key].append(epoch_losses[key].item())
+    
+                          if epoch % 100 == 0:
+                                          pbar.set_postfix({'total': f"{epoch_total.item():.2e}"})
+    
+                print(f'L-BFGS done. Final loss: {self.history["total"][-1]:.2e}')
 
     def save_model(self, path: str):
         torch.save({
