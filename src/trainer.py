@@ -136,11 +136,20 @@ class PINNTrainer:
                 batch: Dict,
                 n_epochs: int = 400,
                 lr: float = 0.05,
+                use_fixed_weights: bool = True,  # Use fixed weights by default for L-BFGS
           ):
                 batch = self.move_batch_to_device(batch)
     
-                # Freeze adaptive loss weights at whatever Adam converged to
-                weights = self._compute_adaptive_weights(batch)
+                if use_fixed_weights:
+                    # Use fixed equal weights for L-BFGS to ensure physics is learned
+                    weights = {'physics': 1.0, 'data': 1.0, 'ic': 1.0}
+                    print(f'  Using fixed weights for L-BFGS → physics: {weights["physics"]:.3f} | '
+                          f'data: {weights["data"]:.3f} | ic: {weights["ic"]:.3f}')
+                else:
+                    # Freeze adaptive loss weights at whatever Adam converged to
+                    weights = self._compute_adaptive_weights(batch)
+                    print(f'  Using adaptive weights from Adam → physics: {weights["physics"]:.3f} | '
+                          f'data: {weights["data"]:.3f} | ic: {weights["ic"]:.3f}')
     
                 optimizer = optim.LBFGS(
                           self.model.parameters(),
