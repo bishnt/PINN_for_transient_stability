@@ -35,7 +35,9 @@ class SwingEquationSolver:
                 fault_factor: float = 1.0) -> np.ndarray:
     delta, omega_deviated = state
     Pe = self.electrical_power(delta, fault_factor)
-    d_delta = self.params.omega0 * omega_deviated # d_delta = omega, where omega is the absolute angular speed, and omega_deviated is (omega - omega0)
+    # FIXED: Removed incorrect omega0 multiplication to match standard swing equation
+    # Standard form: dδ/dt = ω - ω₀ = omega_deviated
+    d_delta = omega_deviated  # d_delta = omega - omega0
     d_omega_deviated = (self.params.omega0 / (2 * self.params.H)) * (self.params.Pm - Pe - self.params.D * omega_deviated)
     return np.array([d_delta, d_omega_deviated])
 
