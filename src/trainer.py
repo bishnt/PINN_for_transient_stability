@@ -72,11 +72,19 @@ class PINNTrainer:
         lr: float = 1e-3,
         log_every: int = 500,
         rebalance_every: int = 50,  # FIX 1: Update weights much more frequently
+        use_adaptive_weights: bool = False,  # Disable adaptive weighting by default
     ):
         batch = self.move_batch_to_device(batch)
-        weights = self._compute_adaptive_weights(batch)
-        print(f'  Initial weights → physics: {weights["physics"]:.3f} | '
-              f'data: {weights["data"]:.3f} | ic: {weights["ic"]:.3f}')
+        
+        if use_adaptive_weights:
+            weights = self._compute_adaptive_weights(batch)
+            print(f'  Initial weights → physics: {weights["physics"]:.3f} | '
+                  f'data: {weights["data"]:.3f} | ic: {weights["ic"]:.3f}')
+        else:
+            # Use fixed equal weights
+            weights = {'physics': 1.0, 'data': 1.0, 'ic': 1.0}
+            print(f'  Using fixed weights → physics: {weights["physics"]:.3f} | '
+                  f'data: {weights["data"]:.3f} | ic: {weights["ic"]:.3f}')
     
         optimizer = optim.Adam(self.model.parameters(), lr=lr, betas=(0.9, 0.999), eps=1e-8)
         
@@ -85,7 +93,7 @@ class PINNTrainer:
         print(' Phase 1: Adam Optimization')
         pbar = tqdm(range(n_epochs), desc='Adam')
         for epoch in pbar:
-            if epoch > 0 and epoch % rebalance_every == 0:
+            if use_adaptive_weights and epoch > 0 and epoch % rebalance_every == 0:
                 weights = self._compute_adaptive_weights(batch, alpha=0.2) 
     
             optimizer.zero_grad()
@@ -119,8 +127,9 @@ class PINNTrainer:
                 })
     
         print(f'Adam done. Final loss: {self.history["total"][-1]:.2e}')
-        print(f'  Final weights → physics: {weights["physics"]:.3f} | '
-              f'data: {weights["data"]:.3f} | ic: {weights["ic"]:.3f}')
+        if use_adaptive_weights:
+            print(f'  Final weights → physics: {weights["physics"]:.3f} | '
+                  f'data: {weights["data"]:.3f} | ic: {weights["ic"]:.3f}')
         
     def train_lbfgs(                           
                 self,

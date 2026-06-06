@@ -61,13 +61,13 @@ class PINNDataGenerator:
     # Convert omega_deviated to absolute omega (omega = omega_deviated + omega0)
     absolute_omega_trajectory = simulation_results['omega_deviated'] + self.params.omega0
     
-    # Convert delta to deviation from equilibrium for better learning
-    # delta_dev = delta - delta_eq
-    delta_dev_trajectory = simulation_results['delta'] - self.params.delta_eq
+    # Keep delta as absolute value - the deviation approach didn't help
+    # because delta_dev is still unbounded
+    delta_trajectory = simulation_results['delta']
 
     return {
         't': simulation_results['time'],
-        'delta': delta_dev_trajectory,  # Return deviation from equilibrium
+        'delta': delta_trajectory,  # Return absolute delta
         'omega': absolute_omega_trajectory # Return absolute omega
     }
 
@@ -99,7 +99,7 @@ class PINNDataGenerator:
 
     # -- Initial condition ------------------------------------------
     t_ic = np.array([0.0])
-    delta_ic = np.array([0.0])  # delta_dev = 0 at equilibrium
+    delta_ic = np.array([self.params.delta_eq])  # Absolute delta at equilibrium
     omega_ic = np.array([self.params.omega0]) # Absolute omega at t=0
 
     # Convert to tensors (requires_grad=True for collocation points)

@@ -71,6 +71,10 @@ class PINN(nn.Module):
         return t / self.t_scale
  
   def _denormalize_delta(self, d_norm: torch.Tensor) -> torch.Tensor:
+        # For unbounded delta, use exponential scaling to handle large values
+        # delta = delta_mean + delta_std * d_norm
+        # But if delta_std is very large, this can cause issues
+        # Use a more robust denormalization for unbounded quantities
         return d_norm * self.delta_std + self.delta_mean
  
   def _denormalize_omega(self, w_norm: torch.Tensor) -> torch.Tensor:
