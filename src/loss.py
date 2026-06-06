@@ -46,8 +46,11 @@ class PINNLoss:
         t_colloc: torch.Tensor
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         out = model(t_colloc)
-        delta = out[:, 0:1]
+        delta_dev = out[:, 0:1]  # Model predicts deviation from equilibrium
         omega = out[:, 1:2]
+
+        # Convert deviation to absolute delta for physics equations
+        delta = delta_dev + self.p.delta_eq
 
         ones = torch.ones_like(delta)
         d_delta_dt = torch.autograd.grad(
@@ -68,17 +71,17 @@ class PINNLoss:
         
         # Time-varying fault factor per collocation point
         ff = self._fault_factor_tensor(t_colloc.detach())
-        # Use delta mod 2π for sin since it's periodic - this handles unbounded delta
-        delta_mod = torch.fmod(delta, 2 * np.pi)
-        Pe = ff * self.p.Pmax * torch.sin(delta_mod)
+        Pe = ff * self.p.Pmax * torch.sin(delta)
  
         residual_omega = d_omega_dt - (
             (self.p.omega0 / (2.0 * self.p.H)) *
             (self.p.Pm - Pe - self.p.D * omega_dev)
         )
         
-        # Return unscaled residuals - let the adaptive weighting handle scaling
-        return residual_delta, residual_omega
+        # Scale residuals to make them comparable and well-conditioned
+        omega0 = self.p.omega0
+        accel_scale = omega0 / (2.0 * self.p.H) 
+        return residual_delta / omega0, residual_omega / accel_scale
 
     def __call__(
                 self,
