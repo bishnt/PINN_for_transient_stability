@@ -152,6 +152,8 @@ class PINNTrainer:
                           def closure():
                                           nonlocal epoch_losses, epoch_total
                                           optimizer.zero_grad()
+                                          # Ensure t_colloc has requires_grad=True for physics residual
+                                          batch['t_colloc'] = batch['t_colloc'].detach().requires_grad_(True)
                                           losses = self.loss_fn(self.model, batch)
                                           total = (
                                           weights['physics'] * losses['physics']

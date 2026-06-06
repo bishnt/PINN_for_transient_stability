@@ -1,6 +1,7 @@
 
 import torch
 import torch.nn as nn
+import numpy as np
 from typing import Dict, Tuple
 from swing_equation import SMIBParameters
 
@@ -67,16 +68,17 @@ class PINNLoss:
         
         # Time-varying fault factor per collocation point
         ff = self._fault_factor_tensor(t_colloc.detach())
-        Pe = ff * self.p.Pmax * torch.sin(delta)
+        # Use delta mod 2π for sin since it's periodic - this handles unbounded delta
+        delta_mod = torch.fmod(delta, 2 * np.pi)
+        Pe = ff * self.p.Pmax * torch.sin(delta_mod)
  
         residual_omega = d_omega_dt - (
             (self.p.omega0 / (2.0 * self.p.H)) *
             (self.p.Pm - Pe - self.p.D * omega_dev)
         )
         
-        omega0 = self.p.omega0
-        accel_scale = omega0 / (2.0 * self.p.H) 
-        return residual_delta / omega0, residual_omega / accel_scale
+        # Return unscaled residuals - let the adaptive weighting handle scaling
+        return residual_delta, residual_omega
 
     def __call__(
                 self,

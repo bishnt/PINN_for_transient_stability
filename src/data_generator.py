@@ -145,9 +145,9 @@ print(f"Reference trajectory generated. Time points: {len(reference_trajectory['
 print(f"Sample (t, delta, omega) from reference:")
 for i in [0, len(reference_trajectory['t']) // 2, -1]:
     t_val = reference_trajectory['t'][i]
-    delta_val = np.degrees(reference_trajectory['delta'][i])
+    delta_val = reference_trajectory['delta'][i]  # Keep in radians
     omega_val = reference_trajectory['omega'][i]
-    print(f"  t={t_val:.3f}s, delta={delta_val:.2f} deg, omega={omega_val:.2f} rad/s")
+    print(f"  t={t_val:.3f}s, delta={delta_val:.4f} rad ({np.degrees(delta_val):.2f} deg), omega={omega_val:.2f} rad/s")
 
 # 2. Sample Training Data
 N_COLLOCATION = 5000
@@ -168,7 +168,7 @@ for key, value in training_data.items():
 
 print("\n--- Initial Conditions Sample ---")
 print(f"t_ic: {training_data['t_ic'].numpy().flatten()}")
-print(f"delta_ic: {np.degrees(training_data['delta_ic'].numpy().flatten())[0]:.2f} degrees")
+print(f"delta_ic: {training_data['delta_ic'].numpy().flatten()[0]:.4f} rad ({np.degrees(training_data['delta_ic'].numpy().flatten()[0]):.2f} deg)")
 print(f"omega_ic: {training_data['omega_ic'].numpy().flatten()[0]:.2f} rad/s")
 
 print("\n--- Sample Collocation Points ---")
@@ -177,9 +177,9 @@ print(f"t_colloc (first 5): {training_data['t_colloc'][:5].detach().numpy().flat
 print("\n--- Sample Data Points (t, delta, omega) ---")
 for i in range(5):
     t_val = training_data['t_data'][i].item()
-    delta_val = np.degrees(training_data['delta_data'][i].item())
+    delta_val = training_data['delta_data'][i].item()
     omega_val = training_data['omega_data'][i].item()
-    print(f"  t={t_val:.3f}s, delta={delta_val:.2f} deg, omega={omega_val:.2f} rad/s")
+    print(f"  t={t_val:.3f}s, delta={delta_val:.4f} rad ({np.degrees(delta_val):.2f} deg), omega={omega_val:.2f} rad/s")
 
 # 3. Generate Test Grid
 N_TEST_POINTS = 1000
