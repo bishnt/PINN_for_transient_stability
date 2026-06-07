@@ -30,12 +30,13 @@ class StabilityAnalyzer:
         n_points: int = 500
     ) -> dict:
         """Compare PINN predictions against RK4 reference."""
-        t_eval = np.linspace(0, trajectory['time'][-1], n_points)
+        # Use 't' key to match data_generator output
+        t_eval = np.linspace(0, trajectory['t'][-1], n_points)
         # PINN predictions
         d_pred, w_pred = self.predict(t_eval)
         # Interpolate RK4 to same time points
-        d_ref = np.interp(t_eval, trajectory['time'], trajectory['delta'])
-        w_ref = np.interp(t_eval, trajectory['time'], trajectory['omega_deviated'])
+        d_ref = np.interp(t_eval, trajectory['t'], trajectory['delta'])
+        w_ref = np.interp(t_eval, trajectory['t'], trajectory['omega'])
         mae_delta = np.mean(np.abs(d_pred - d_ref))
         mae_omega = np.mean(np.abs(w_pred - w_ref))
         rmse_d = np.sqrt(np.mean((d_pred - d_ref)**2))
