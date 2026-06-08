@@ -18,11 +18,11 @@ class StabilityAnalyzer:
         self.solver = SwingEquationSolver(params)
 
     def predict(self, t_values: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
-        """Run PINN inference on time array."""
+        """Run PINN inference on time array. Returns delta and omega_deviated."""
         t_tensor = torch.FloatTensor(t_values).reshape(-1, 1).to(self.device)
         with torch.no_grad():
             out = self.model(t_tensor).cpu().numpy()
-        return out[:, 0], out[:, 1]  # delta, omega
+        return out[:, 0], out[:, 1]  # delta, omega_deviated
 
     def evaluate_accuracy(
         self,
@@ -32,19 +32,21 @@ class StabilityAnalyzer:
         """Compare PINN predictions against RK4 reference."""
         # Use 't' key to match data_generator output
         t_eval = np.linspace(0, trajectory['t'][-1], n_points)
-        # PINN predictions
+        # PINN predictions (returns delta and omega_deviated)
         d_pred, w_pred = self.predict(t_eval)
         # Interpolate RK4 to same time points
         d_ref = np.interp(t_eval, trajectory['t'], trajectory['delta'])
         w_ref = np.interp(t_eval, trajectory['t'], trajectory['omega'])
+        # Convert reference omega (absolute) to omega_deviated for comparison
+        w_ref_deviated = w_ref - self.params.omega0
         mae_delta = np.mean(np.abs(d_pred - d_ref))
-        mae_omega = np.mean(np.abs(w_pred - w_ref))
+        mae_omega = np.mean(np.abs(w_pred - w_ref_deviated))
         rmse_d = np.sqrt(np.mean((d_pred - d_ref)**2))
-        rmse_w = np.sqrt(np.mean((w_pred - w_ref)**2))
+        rmse_w = np.sqrt(np.mean((w_pred - w_ref_deviated)**2))
         return {
             't': t_eval,
             'delta_pred': d_pred, 'delta_ref': d_ref,
-            'omega_pred': w_pred, 'omega_ref': w_ref,
+            'omega_pred': w_pred, 'omega_ref': w_ref_deviated,
             'mae_delta': mae_delta, 'mae_omega': mae_omega,
             'rmse_delta': rmse_d, 'rmse_omega': rmse_w,
         }
@@ -65,9 +67,9 @@ class StabilityAnalyzer:
         ax1.legend(fontsize=10); ax1.grid(True, alpha=0.3)
         ax1.set_title(f"PINN vs RK4 | RMSE delta: {np.degrees(results['rmse_delta']):.4f} deg",
                       fontsize=12, fontweight='bold')
-        ax2.plot(t, results['omega_ref'] - 2*np.pi*60, 'b-',
+        ax2.plot(t, results['omega_ref'], 'b-',
                  linewidth=2.5, label='RK4 Reference')
-        ax2.plot(t, results['omega_pred'] - 2*np.pi*60, 'r--',
+        ax2.plot(t, results['omega_pred'], 'r--',
                  linewidth=2, label='PINN Prediction')
         ax2.set_ylabel('Speed Deviation omega_dev (rad/s)', fontsize=11)
         ax2.set_xlabel('Time (s)', fontsize=11)
@@ -88,44 +90,40 @@ class StabilityAnalyzer:
         """
         Build a 2D stability map over (fault duration, initial angle).
         Returns: stability_map[i,j] = 1 (stable) or 0 (unstable)
-        
+
         Args:
             fault_durations: Array of fault durations to test (in seconds)
             initial_angles: Array of initial rotor angles to test (in radians)
             t_total: Total simulation time
             delta_threshold_deg: Angle threshold for stability (degrees)
-            use_pinn: If True, use PINN for fast screening; if False, use RK4
+            use_pinn: If True, use RK4 (PINN not suitable for parameter sweeps);
+                      if False, also use RK4
         """
         threshold = np.radians(delta_threshold_deg)
         stability_map = np.zeros((len(initial_angles), len(fault_durations)))
         print('Computing stability map...')
-        
+
         for i, delta0 in enumerate(initial_angles):
             for j, fault_dur in enumerate(fault_durations):
-                if use_pinn:
-                    # Use PINN for fast screening
-                    t_eval = np.linspace(0, t_total, 200)
-                    d_pred, w_pred = self.predict(t_eval)
-                    max_angle = np.max(np.abs(d_pred))
+                # Use RK4 for stability assessment
+                # PINN is trained on a single fault scenario and cannot generalize
+                # to different fault durations or initial angles
+                try:
+                    traj = self.solver.simulate(
+                        t_span=(0.0, t_total),
+                        dt=0.001,
+                        delta0=delta0,
+                        omega_deviated0=0.0,
+                        fault_start=0.0,
+                        fault_end=fault_dur,
+                        fault_factor_pre=1.0,
+                        fault_factor_fault=0.0,
+                        fault_factor_post=1.0
+                    )
+                    max_angle = np.max(np.abs(traj['delta']))
                     stability_map[i, j] = 1.0 if max_angle < threshold else 0.0
-                else:
-                    # Use RK4 as reference
-                    try:
-                        traj = self.solver.simulate(
-                            t_span=(0.0, t_total),
-                            dt=0.001,
-                            delta0=delta0,
-                            omega_deviated0=0.0,
-                            fault_start=0.0,
-                            fault_end=fault_dur,
-                            fault_factor_pre=1.0,
-                            fault_factor_fault=0.0,
-                            fault_factor_post=1.0
-                        )
-                        max_angle = np.max(np.abs(traj['delta']))
-                        stability_map[i, j] = 1.0 if max_angle < threshold else 0.0
-                    except:
-                        stability_map[i, j] = 0.0
+                except:
+                    stability_map[i, j] = 0.0
         return stability_map
 
     def plot_stability_map(
