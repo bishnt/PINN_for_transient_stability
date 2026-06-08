@@ -1,26 +1,8 @@
 
 import numpy as np
 from dataclasses import dataclass
-from typing import Dict, Tuple, Optional
+from typing import Dict, Tuple, Optional, List
 from swing_equation import SMIBParameters, SwingEquationSolver
-
-
-
-# 1. Initialize SMIB Parameters
-smib_params = SMIBParameters(
-    H=5.0,
-    D=0.05,
-    omega0=2 * np.pi * 60,
-    Pm=0.8,
-    Pmax=2.1
-)
-
-# 2. Instantiate the SwingEquationSolver
-solver = SwingEquationSolver(smib_params)
-
-print(f"SMIB Parameters Initialized: {smib_params}")
-print(f"Solver Initialized. Equilibrium Delta: {np.degrees(smib_params.delta_eq):.2f} degrees")
-
 import torch
 
 class PINNDataGenerator:
@@ -128,70 +110,229 @@ class PINNDataGenerator:
     t = np.linspace(0, t_total, n_points)
     return torch.FloatTensor(t).reshape(-1, 1)
 
-# 1. Instantiate the PINNDataGenerator
-data_generator = PINNDataGenerator(params=smib_params, seed=42)
+  def generate_multiple_trajectories(
+      self,
+      n_trajectories: int = 10,
+      fault_start_range: Tuple[float, float] = (0.05, 0.3),
+      fault_duration_range: Tuple[float, float] = (0.05, 0.15),
+      t_total: float = 2.0,
+      dt: float = 0.001,
+      include_unstable: bool = True,
+      unstable_fraction: float = 0.2,
+      seed: Optional[int] = None
+  ) -> List[dict]:
+    """
+    Generate multiple trajectories with varying fault scenarios.
+    
+    Args:
+        n_trajectories: Number of trajectories to generate
+        fault_start_range: (min, max) range for fault start times
+        fault_duration_range: (min, max) range for fault durations (for stable cases)
+        t_total: Total simulation time
+        dt: Time step for simulation
+        include_unstable: If True, include some long-duration faults that cause instability
+        unstable_fraction: Fraction of trajectories that should be potentially unstable (0.0-1.0)
+        seed: Random seed for reproducibility
+    
+    Returns:
+        List of trajectory dictionaries
+    """
+    if seed is not None:
+        np.random.seed(seed)
+    
+    trajectories = []
+    n_unstable = int(n_trajectories * unstable_fraction) if include_unstable else 0
+    
+    for i in range(n_trajectories):
+        # Sample fault start time
+        fault_start = np.random.uniform(*fault_start_range)
+        
+        # Sample fault duration
+        if i < n_trajectories - n_unstable:
+            # First portion: short faults (stable)
+            fault_duration = np.random.uniform(*fault_duration_range)
+        else:
+            # Last portion: longer faults (potentially unstable)
+            fault_duration = np.random.uniform(0.20, 0.35)
+        
+        fault_end = fault_start + fault_duration
+        
+        # Vary Pm slightly to get different operating points
+        Pm_variation = np.random.uniform(-0.1, 0.1)
+        varied_params = SMIBParameters(
+            H=self.params.H,
+            D=self.params.D,
+            omega0=self.params.omega0,
+            Pm=self.params.Pm + Pm_variation,
+            Pmax=self.params.Pmax
+        )
+        varied_solver = SwingEquationSolver(varied_params)
+        
+        # Generate trajectory
+        simulation_results = varied_solver.simulate(
+            t_span=(0.0, t_total),
+            dt=dt,
+            delta0=varied_params.delta_eq,
+            omega_deviated0=0.0,
+            fault_start=fault_start,
+            fault_end=fault_end,
+            fault_factor_pre=1.0,
+            fault_factor_fault=0.0,
+            fault_factor_post=1.0
+        )
+        
+        absolute_omega = simulation_results['omega_deviated'] + varied_params.omega0
+        delta_trajectory = simulation_results['delta']
+        
+        trajectories.append({
+            't': simulation_results['time'],
+            'delta': delta_trajectory,
+            'omega': absolute_omega,
+            'fault_start': fault_start,
+            'fault_end': fault_end,
+            'Pm': varied_params.Pm,
+            'is_stable': self._check_stability(delta_trajectory, simulation_results['time'])
+        })
+    
+    return trajectories
+  
+  def _check_stability(self, delta: np.ndarray, time: np.ndarray, 
+                       threshold_deg: float = 180.0) -> bool:
+    """Check if trajectory remains stable (delta doesn't exceed threshold)."""
+    max_delta_deg = np.max(np.abs(np.degrees(delta)))
+    
+    # A trajectory is unstable if:
+    # 1. Delta exceeds threshold (loss of synchronism)
+    # 2. Delta keeps growing monotonically at the end (diverging)
+    
+    if max_delta_deg > threshold_deg:
+        return False
+    
+    # Check if delta keeps growing at the end (unstable)
+    if len(time) > 100:
+        # Look at last 50 points
+        final_segment = delta[-50:]
+        # If monotonic increase over 10 degrees in final segment, likely unstable
+        delta_change = final_segment[-1] - final_segment[0]
+        if delta_change > np.radians(10):  # More than 10 degrees increase
+            return False
+    
+    return True
 
-# Define simulation parameters for the reference trajectory
-REF_FAULT_START = 1.0
-REF_FAULT_END = 1.2
-REF_T_TOTAL = 5.0
-REF_DT = 0.0001 # Even finer resolution for reference
+  def sample_from_multiple_trajectories(
+      self,
+      trajectories: List[dict],
+      n_collocation_per_traj: int = 500,
+      n_data_points_per_traj: int = 15,
+      t_total: float = 2.0
+  ) -> Dict[str, torch.Tensor]:
+    """
+    Sample training data from multiple trajectories.
+    
+    Args:
+        trajectories: List of trajectory dictionaries
+        n_collocation_per_traj: Number of collocation points per trajectory
+        n_data_points_per_traj: Number of data points per trajectory
+        t_total: Total time for collocation sampling
+    
+    Returns:
+        Dictionary with concatenated training data from all trajectories
+    """
+    all_t_colloc = []
+    all_t_data = []
+    all_delta_data = []
+    all_omega_data = []
+    
+    for traj in trajectories:
+        # Collocation points for this trajectory
+        intervals = np.linspace(0, t_total, n_collocation_per_traj + 1)
+        t_colloc = np.array([
+            np.random.uniform(intervals[i], intervals[i+1])
+            for i in range(n_collocation_per_traj)
+        ])
+        all_t_colloc.append(t_colloc)
+        
+        # Data points from this trajectory
+        idx = np.linspace(0, len(traj['t'])-1, n_data_points_per_traj, dtype=int)
+        all_t_data.append(traj['t'][idx])
+        all_delta_data.append(traj['delta'][idx])
+        all_omega_data.append(traj['omega'][idx])
+    
+    # Concatenate all data
+    t_colloc = np.concatenate(all_t_colloc)
+    t_data = np.concatenate(all_t_data)
+    delta_data = np.concatenate(all_delta_data)
+    omega_data = np.concatenate(all_omega_data)
+    
+    # Initial condition (use equilibrium from base params)
+    t_ic = np.array([0.0])
+    delta_ic = np.array([self.params.delta_eq])
+    omega_ic = np.array([self.params.omega0])
+    
+    def to_tensor(arr, grad=False):
+        t = torch.FloatTensor(arr).reshape(-1, 1)
+        t.requires_grad_(grad)
+        return t
+    
+    return {
+        't_colloc': to_tensor(t_colloc, grad=True),
+        't_data': to_tensor(t_data),
+        'delta_data': to_tensor(delta_data),
+        'omega_data': to_tensor(omega_data),
+        't_ic': to_tensor(t_ic),
+        'delta_ic': to_tensor(delta_ic),
+        'omega_ic': to_tensor(omega_ic),
+    }
 
-print(f"\nGenerating reference trajectory for t_total={REF_T_TOTAL}s, dt={REF_DT}s...")
-reference_trajectory = data_generator.generate_reference_trajectory(
-    fault_start=REF_FAULT_START,
-    fault_end=REF_FAULT_END,
-    t_total=REF_T_TOTAL,
-    dt=REF_DT
-)
 
-print(f"Reference trajectory generated. Time points: {len(reference_trajectory['t'])}")
-print(f"Sample (t, delta, omega) from reference:")
-for i in [0, len(reference_trajectory['t']) // 2, -1]:
-    t_val = reference_trajectory['t'][i]
-    delta_val = reference_trajectory['delta'][i]  # Keep in radians
-    omega_val = reference_trajectory['omega'][i]
-    print(f"  t={t_val:.3f}s, delta={delta_val:.4f} rad ({np.degrees(delta_val):.2f} deg), omega={omega_val:.2f} rad/s")
-
-# 2. Sample Training Data
-N_COLLOCATION = 5000
-N_DATA_POINTS = 100
-TRAINING_T_TOTAL = 5.0
-
-print(f"\nSampling training data: {N_COLLOCATION} collocation, {N_DATA_POINTS} data points...")
-training_data = data_generator.sample_training_data(
-    trajectory=reference_trajectory,
-    n_collocation=N_COLLOCATION,
-    n_data_points=N_DATA_POINTS,
-    t_total=TRAINING_T_TOTAL
-)
-
-print("--- Training Data Shapes ---")
-for key, value in training_data.items():
-    print(f"{key}: {value.shape} (requires_grad={value.requires_grad})")
-
-print("\n--- Initial Conditions Sample ---")
-print(f"t_ic: {training_data['t_ic'].numpy().flatten()}")
-print(f"delta_ic: {training_data['delta_ic'].numpy().flatten()[0]:.4f} rad ({np.degrees(training_data['delta_ic'].numpy().flatten()[0]):.2f} deg)")
-print(f"omega_ic: {training_data['omega_ic'].numpy().flatten()[0]:.2f} rad/s")
-
-print("\n--- Sample Collocation Points ---")
-print(f"t_colloc (first 5): {training_data['t_colloc'][:5].detach().numpy().flatten()}")
-
-print("\n--- Sample Data Points (t, delta, omega) ---")
-for i in range(5):
-    t_val = training_data['t_data'][i].item()
-    delta_val = training_data['delta_data'][i].item()
-    omega_val = training_data['omega_data'][i].item()
-    print(f"  t={t_val:.3f}s, delta={delta_val:.4f} rad ({np.degrees(delta_val):.2f} deg), omega={omega_val:.2f} rad/s")
-
-# 3. Generate Test Grid
-N_TEST_POINTS = 1000
-TEST_T_TOTAL = 5.0
-
-print(f"\nGenerating test grid with {N_TEST_POINTS} points...")
-test_grid = data_generator.generate_test_grid(t_total=TEST_T_TOTAL, n_points=N_TEST_POINTS)
-
-print(f"Test grid shape: {test_grid.shape}")
-print(f"Test grid (first 5): {test_grid[:5].numpy().flatten()}")
-print(f"Test grid (last 5): {test_grid[-5:].numpy().flatten()}")
+if __name__ == '__main__':
+    # Example usage demonstrating multiple trajectory generation
+    smib_params = SMIBParameters(
+        H=5.0,
+        D=0.05,
+        omega0=2 * np.pi * 60,
+        Pm=0.8,
+        Pmax=2.1
+    )
+    
+    data_generator = PINNDataGenerator(params=smib_params, seed=42)
+    
+    print("=== Generating Multiple Trajectories ===\n")
+    trajectories = data_generator.generate_multiple_trajectories(
+        n_trajectories=10,
+        fault_start_range=(0.05, 0.3),
+        fault_duration_range=(0.05, 0.15),
+        t_total=2.0,
+        dt=0.001,
+        include_unstable=True,
+        seed=42
+    )
+    
+    print(f"Generated {len(trajectories)} trajectories:")
+    stable_count = sum(1 for t in trajectories if t['is_stable'])
+    unstable_count = len(trajectories) - stable_count
+    print(f"  Stable: {stable_count}, Unstable: {unstable_count}\n")
+    
+    for i, traj in enumerate(trajectories[:5]):  # Show first 5
+        print(f"Trajectory {i+1}:")
+        print(f"  Fault: {traj['fault_start']:.3f}s - {traj['fault_end']:.3f}s "
+              f"(duration: {traj['fault_end']-traj['fault_start']:.3f}s)")
+        print(f"  Pm: {traj['Pm']:.3f} pu")
+        print(f"  Delta range: {np.degrees(traj['delta'].min()):.1f}° - "
+              f"{np.degrees(traj['delta'].max()):.1f}°")
+        print(f"  Stable: {traj['is_stable']}")
+        print()
+    
+    # Sample training data from all trajectories
+    print("=== Sampling Training Data ===")
+    training_data = data_generator.sample_from_multiple_trajectories(
+        trajectories,
+        n_collocation_per_traj=500,
+        n_data_points_per_traj=15,
+        t_total=2.0
+    )
+    
+    print(f"Total collocation points: {training_data['t_colloc'].shape[0]}")
+    print(f"Total data points: {training_data['t_data'].shape[0]}")
+    print(f"Delta data range: {np.degrees(training_data['delta_data'].min().item()):.1f}° - "
+          f"{np.degrees(training_data['delta_data'].max().item()):.1f}°")
