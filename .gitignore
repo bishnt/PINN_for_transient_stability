@@ -1,22 +1,60 @@
-# Virtual environments
-venv/
-.venv/
-env/
-pinn_env/
-
-# Python cache
+```
+# Python
 __pycache__/
 *.pyc
+*.pyo
+*.pyd
+.Python
+env/
+venv/
+.venv/
+.ENV
+.python-version
+pip-log.txt
+pip-delete-this-directory.txt
+.tox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+*.log
+.git/
+.mypy_cache/
+.pytest_cache/
+.hypothesis/
 
-# Jupyter
-.ipynb_checkpoints/
+# Jupyter Notebook
+.ipynb_checkpoints
+*/.ipynb_checkpoints/*
+*.ipynb~
 
-# Model checkpoints (optional)
-checkpoints/
+# Distribution / packaging
+.Python
+_build/
+buck-out/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
 
-# Results (optional)
-results/
-
-# IDE files
+# IDEs
 .vscode/
 .idea/
+*.swp
+*.swo
+*~
+```

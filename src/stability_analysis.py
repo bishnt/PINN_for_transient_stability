@@ -18,11 +18,11 @@ class StabilityAnalyzer:
         self.solver = SwingEquationSolver(params)
 
     def predict(self, t_values: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
-        """Run PINN inference on time array. Returns delta and omega_deviated."""
+        """Run PINN inference on time array. Returns delta and omega (absolute)."""
         t_tensor = torch.FloatTensor(t_values).reshape(-1, 1).to(self.device)
         with torch.no_grad():
             out = self.model(t_tensor).cpu().numpy()
-        return out[:, 0], out[:, 1]  # delta, omega_deviated
+        return out[:, 0], out[:, 1]  # delta, omega (absolute)
 
     def evaluate_accuracy(
         self,
@@ -32,21 +32,20 @@ class StabilityAnalyzer:
         """Compare PINN predictions against RK4 reference."""
         # Use 't' key to match data_generator output
         t_eval = np.linspace(0, trajectory['t'][-1], n_points)
-        # PINN predictions (returns delta and omega_deviated)
+        # PINN predictions (returns delta and omega - both absolute)
         d_pred, w_pred = self.predict(t_eval)
         # Interpolate RK4 to same time points
         d_ref = np.interp(t_eval, trajectory['t'], trajectory['delta'])
         w_ref = np.interp(t_eval, trajectory['t'], trajectory['omega'])
-        # Convert reference omega (absolute) to omega_deviated for comparison
-        w_ref_deviated = w_ref - self.params.omega0
+        # Both are now absolute values - compare directly
         mae_delta = np.mean(np.abs(d_pred - d_ref))
-        mae_omega = np.mean(np.abs(w_pred - w_ref_deviated))
+        mae_omega = np.mean(np.abs(w_pred - w_ref))
         rmse_d = np.sqrt(np.mean((d_pred - d_ref)**2))
-        rmse_w = np.sqrt(np.mean((w_pred - w_ref_deviated)**2))
+        rmse_w = np.sqrt(np.mean((w_pred - w_ref)**2))
         return {
             't': t_eval,
             'delta_pred': d_pred, 'delta_ref': d_ref,
-            'omega_pred': w_pred, 'omega_ref': w_ref_deviated,
+            'omega_pred': w_pred, 'omega_ref': w_ref,
             'mae_delta': mae_delta, 'mae_omega': mae_omega,
             'rmse_delta': rmse_d, 'rmse_omega': rmse_w,
         }
@@ -71,7 +70,7 @@ class StabilityAnalyzer:
                  linewidth=2.5, label='RK4 Reference')
         ax2.plot(t, results['omega_pred'], 'r--',
                  linewidth=2, label='PINN Prediction')
-        ax2.set_ylabel('Speed Deviation omega_dev (rad/s)', fontsize=11)
+        ax2.set_ylabel('Angular Velocity omega (rad/s)', fontsize=11)
         ax2.set_xlabel('Time (s)', fontsize=11)
         ax2.legend(fontsize=10); ax2.grid(True, alpha=0.3)
         plt.tight_layout()
